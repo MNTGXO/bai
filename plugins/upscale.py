@@ -5,7 +5,7 @@ import os
 import ffmpeg
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
-from pyrogram.errors import MediaTooLarge
+from pyrogram.errors import FileTooLarge
 import logging
 
 logger = logging.getLogger(__name__)
