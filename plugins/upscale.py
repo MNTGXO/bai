@@ -5,11 +5,13 @@ import os
 import ffmpeg
 from pyrogram import filters, Client
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
-from pyrogram.errors import FileTooLarge, VideoTooLong
 import logging
 import asyncio
 
 logger = logging.getLogger(__name__)
+
+# You need to define your bot client here
+# MN_Bot = Client("video_bot", api_id=YOUR_API_ID, api_hash="YOUR_API_HASH", bot_token="YOUR_BOT_TOKEN")
 
 class TEXT:
     PROCESSING = "⏳ Processing your video..."
@@ -49,9 +51,6 @@ QUALITY_OPTIONS = {
 
 TEMP_DIR = "temp_files"
 os.makedirs(TEMP_DIR, exist_ok=True)
-
-# Initialize the bot client (you need to define this)
-# MN_Bot = Client("video_bot", api_id=YOUR_API_ID, api_hash="YOUR_API_HASH", bot_token="YOUR_BOT_TOKEN")
 
 # Please give credits https://github.com/MN-BOTS
 # @MrMNTG @MusammilN
@@ -115,146 +114,7 @@ async def process_video(file_path, action, quality):
 
 # Please give credits https://github.com/MN-BOTS
 # @MrMNTG @MusammilN
-def video_handler(client, message):
-    @client.on_message(filters.video | filters.document)
-    async def handle_video(client, message):
-        if message.document and not message.document.mime_type.startswith('video/'):
-            return
-        
-        await message.reply_text(
-            TEXT.CHOOSE_ACTION,
-            reply_markup=INLINE.ACTION_BTNS
-        )
-    return handle_video
-
-# Please give credits https://github.com/MN-BOTS
-# @MrMNTG @MusammilN
-def action_handler(client):
-    @client.on_callback_query(filters.regex("^action_(upscale|compress)$"))
-    async def handle_action(client, callback):
-        try:
-            action = callback.data.split('_')[1]
-            quality_btns = [
-                [InlineKeyboardButton(quality, callback_data=f"quality_{action}_{quality.replace(' ', '_').replace('(', '').replace(')', '')}")]
-                for quality in QUALITY_OPTIONS[action]
-            ]
-            
-            await callback.message.edit_text(
-                TEXT.CHOOSE_QUALITY,
-                reply_markup=InlineKeyboardMarkup(quality_btns)
-            )
-            await callback.answer()
-        except Exception as e:
-            logger.error(f"Action error: {str(e)}")
-            await callback.answer(TEXT.FAILED, show_alert=True)
-    return handle_action
-
-# Please give credits https://github.com/MN-BOTS
-# @MrMNTG @MusammilN
-def quality_handler(client):
-    @client.on_callback_query(filters.regex("^quality_"))
-    async def handle_quality(client, callback):
-        processing_msg = None
-        file_path = None
-        processed_path = None
-        
-        try:
-            data = callback.data.split('_')
-            action = data[1]
-            # Reconstruct quality name properly
-            quality_parts = data[2:]
-            
-            # Find matching quality from options
-            quality = None
-            for q in QUALITY_OPTIONS[action]:
-                clean_q = q.replace(' ', '_').replace('(', '').replace(')', '')
-                if clean_q == '_'.join(quality_parts):
-                    quality = q
-                    break
-            
-            if not quality:
-                raise Exception("Invalid quality selection")
-            
-            # Get the original message with video
-            if not callback.message.reply_to_message:
-                await callback.answer("Original video message not found", show_alert=True)
-                return
-                
-            original_msg = callback.message.reply_to_message
-            
-            processing_msg = await callback.message.reply_text(TEXT.PROCESSING)
-            
-            # Get file info
-            if original_msg.video:
-                file_id = original_msg.video.file_id
-                file_ext = "mp4"
-            elif original_msg.document and original_msg.document.mime_type.startswith('video/'):
-                file_id = original_msg.document.file_id
-                file_ext = original_msg.document.file_name.split('.')[-1] if original_msg.document.file_name else "mp4"
-            else:
-                raise Exception("No video found")
-            
-            file_path = os.path.join(TEMP_DIR, f"original_{file_id}.{file_ext}")
-            
-            # Download the file
-            await client.download_media(original_msg, file_name=file_path)
-            
-            # Process the video
-            processed_path = await process_video(file_path, action, quality)
-            
-            if not processed_path or not os.path.exists(processed_path):
-                raise Exception("Processing failed")
-            
-            # Send the processed video
-            try:
-                await callback.message.reply_video(
-                    processed_path,
-                    caption=f"{TEXT.SUCCESS}\n{TEXT.WATERMARK}",
-                    reply_markup=INLINE.CREDITS_BTN
-                )
-            except (VideoTooLong, FileTooLarge):
-                await callback.message.reply_document(
-                    processed_path,
-                    caption=f"{TEXT.SUCCESS}\n{TEXT.WATERMARK}",
-                    reply_markup=INLINE.CREDITS_BTN
-                )
-            
-            await callback.answer()
-            
-        except Exception as e:
-            logger.error(f"Quality error: {str(e)}")
-            await callback.answer(TEXT.FAILED, show_alert=True)
-        finally:
-            # Clean up processing message
-            if processing_msg:
-                try:
-                    await processing_msg.delete()
-                except:
-                    pass
-            
-            # Clean up files
-            if file_path and os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except:
-                    pass
-            if processed_path and os.path.exists(processed_path):
-                try:
-                    os.remove(processed_path)
-                except:
-                    pass
-    
-    return handle_quality
-"""
-# Please give credits https://github.com/MN-BOTS
-# @MrMNTG @MusammilN
-def register(bot):
-    video_handler(bot)
-    action_handler(bot)
-    quality_handler(bot)
-
-"""
-
+# Note: Replace MN_Bot with your actual bot client variable
 @MN_Bot.on_message(filters.video | filters.document)
 async def video_handler_direct(client, message):
     if message.document and not message.document.mime_type.startswith('video/'):
@@ -285,5 +145,105 @@ async def action_handler_direct(client, callback):
 
 @MN_Bot.on_callback_query(filters.regex("^quality_"))
 async def quality_handler_direct(client, callback):
-    # ... (same implementation as in quality_handler function above)
-    pass
+    processing_msg = None
+    file_path = None
+    processed_path = None
+    
+    try:
+        data = callback.data.split('_')
+        action = data[1]
+        # Reconstruct quality name properly
+        quality_parts = data[2:]
+        
+        # Find matching quality from options
+        quality = None
+        for q in QUALITY_OPTIONS[action]:
+            clean_q = q.replace(' ', '_').replace('(', '').replace(')', '')
+            if clean_q == '_'.join(quality_parts):
+                quality = q
+                break
+        
+        if not quality:
+            raise Exception("Invalid quality selection")
+        
+        # Get the original message with video
+        if not callback.message.reply_to_message:
+            await callback.answer("Original video message not found", show_alert=True)
+            return
+            
+        original_msg = callback.message.reply_to_message
+        
+        processing_msg = await callback.message.reply_text(TEXT.PROCESSING)
+        
+        # Get file info
+        if original_msg.video:
+            file_id = original_msg.video.file_id
+            file_ext = "mp4"
+        elif original_msg.document and original_msg.document.mime_type.startswith('video/'):
+            file_id = original_msg.document.file_id
+            file_ext = original_msg.document.file_name.split('.')[-1] if original_msg.document.file_name else "mp4"
+        else:
+            raise Exception("No video found")
+        
+        file_path = os.path.join(TEMP_DIR, f"original_{file_id}.{file_ext}")
+        
+        # Download the file
+        await client.download_media(original_msg, file_name=file_path)
+        
+        # Process the video
+        processed_path = await process_video(file_path, action, quality)
+        
+        if not processed_path or not os.path.exists(processed_path):
+            raise Exception("Processing failed")
+        
+        # Send the processed video with file size check
+        file_size = os.path.getsize(processed_path)
+        max_video_size = 50 * 1024 * 1024  # 50MB limit for videos
+        
+        try:
+            if file_size > max_video_size:
+                # Send as document if file is too large for video
+                await callback.message.reply_document(
+                    processed_path,
+                    caption=f"{TEXT.SUCCESS}\n{TEXT.WATERMARK}",
+                    reply_markup=INLINE.CREDITS_BTN
+                )
+            else:
+                await callback.message.reply_video(
+                    processed_path,
+                    caption=f"{TEXT.SUCCESS}\n{TEXT.WATERMARK}",
+                    reply_markup=INLINE.CREDITS_BTN
+                )
+        except Exception as e:
+            # Fallback to document if video sending fails
+            logger.warning(f"Failed to send as video, trying as document: {e}")
+            await callback.message.reply_document(
+                processed_path,
+                caption=f"{TEXT.SUCCESS}\n{TEXT.WATERMARK}",
+                reply_markup=INLINE.CREDITS_BTN
+            )
+        
+        await callback.answer()
+        
+    except Exception as e:
+        logger.error(f"Quality error: {str(e)}")
+        await callback.answer(TEXT.FAILED, show_alert=True)
+    finally:
+        # Clean up processing message
+        if processing_msg:
+            try:
+                await processing_msg.delete()
+            except:
+                pass
+        
+        # Clean up files
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except:
+                pass
+        if processed_path and os.path.exists(processed_path):
+            try:
+                os.remove(processed_path)
+            except:
+                pass
