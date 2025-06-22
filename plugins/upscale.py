@@ -10,9 +10,6 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
-# You need to define your bot client here
-# MN_Bot = Client("video_bot", api_id=YOUR_API_ID, api_hash="YOUR_API_HASH", bot_token="YOUR_BOT_TOKEN")
-
 class TEXT:
     PROCESSING = "⏳ Processing your video..."
     SUCCESS = "✅ Here's your processed video!"
@@ -20,6 +17,8 @@ class TEXT:
     CHOOSE_ACTION = "What would you like to do with this video?"
     CHOOSE_QUALITY = "Select quality:"
     WATERMARK = "Join @MNBots and @MrMNTG in Telegram"
+    FILE_TOO_LARGE = "❌ File too large. Please send a smaller video file."
+    INVALID_FILE = "❌ Please send a valid video file."
 
 class INLINE:
     ACTION_BTNS = InlineKeyboardMarkup([
@@ -50,6 +49,9 @@ QUALITY_OPTIONS = {
 }
 
 TEMP_DIR = "temp_files"
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB limit for downloads
+MAX_VIDEO_SIZE = 50 * 1024 * 1024  # 50MB limit for video uploads
+
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 # Please give credits https://github.com/MN-BOTS
@@ -65,9 +67,9 @@ async def add_watermark(input_file, output_file):
                 .input(input_file)
                 .filter('drawtext', text=TEXT.WATERMARK, fontsize=24,
                         fontcolor='white@0.8', x='(w-text_w)/2', y='h-text_h-10')
-                .output(output_file)
+                .output(output_file, **{'c:v': 'libx264', 'preset': 'fast'})
                 .overwrite_output()
-                .run(quiet=True)
+                .run(quiet=True, capture_stdout=True, capture_stderr=True)
             )
         )
         return True
@@ -86,20 +88,25 @@ async def process_video(file_path, action, quality):
         
         # Run ffmpeg in executor to avoid blocking
         loop = asyncio.get_event_loop()
+        
+        # First process the video with quality settings
         await loop.run_in_executor(
             None,
             lambda: (
                 ffmpeg
                 .input(file_path)
                 .filter('scale', settings["resolution"])
-                .output(processed_path, video_bitrate=settings["bitrate"])
+                .output(processed_path, 
+                       **{'c:v': 'libx264', 'b:v': settings["bitrate"], 'preset': 'fast'})
                 .overwrite_output()
-                .run(quiet=True)
+                .run(quiet=True, capture_stdout=True, capture_stderr=True)
             )
         )
         
+        # Add watermark
         if not await add_watermark(processed_path, final_path):
-            return None
+            logger.warning("Watermark failed, using processed video without watermark")
+            return processed_path
         
         return final_path
     except Exception as e:
@@ -114,19 +121,33 @@ async def process_video(file_path, action, quality):
 
 # Please give credits https://github.com/MN-BOTS
 # @MrMNTG @MusammilN
-# Note: Replace MN_Bot with your actual bot client variable
-@MN_Bot.on_message(filters.video | filters.document)
-async def video_handler_direct(client, message):
-    if message.document and not message.document.mime_type.startswith('video/'):
-        return
-    
-    await message.reply_text(
-        TEXT.CHOOSE_ACTION,
-        reply_markup=INLINE.ACTION_BTNS
-    )
+@Client.on_message(filters.video | (filters.document & filters.regex(r'\.(mp4|avi|mkv|mov|wmv|flv|webm)$')))
+async def video_handler(client, message):
+    try:
+        # Check file size
+        file_size = 0
+        if message.video:
+            file_size = message.video.file_size
+        elif message.document:
+            file_size = message.document.file_size
+            # Check if it's actually a video file
+            if not (message.document.mime_type and message.document.mime_type.startswith('video/')):
+                return
+        
+        if file_size > MAX_FILE_SIZE:
+            await message.reply_text(TEXT.FILE_TOO_LARGE)
+            return
+        
+        await message.reply_text(
+            TEXT.CHOOSE_ACTION,
+            reply_markup=INLINE.ACTION_BTNS
+        )
+    except Exception as e:
+        logger.error(f"Video handler error: {e}")
+        await message.reply_text(TEXT.INVALID_FILE)
 
 @Client.on_callback_query(filters.regex("^action_(upscale|compress)$"))
-async def action_handler_direct(client, callback):
+async def action_handler(client, callback):
     try:
         action = callback.data.split('_')[1]
         quality_btns = [
@@ -144,7 +165,7 @@ async def action_handler_direct(client, callback):
         await callback.answer(TEXT.FAILED, show_alert=True)
 
 @Client.on_callback_query(filters.regex("^quality_"))
-async def quality_handler_direct(client, callback):
+async def quality_handler(client, callback):
     processing_msg = None
     file_path = None
     processed_path = None
@@ -173,6 +194,7 @@ async def quality_handler_direct(client, callback):
             
         original_msg = callback.message.reply_to_message
         
+        # Show processing message
         processing_msg = await callback.message.reply_text(TEXT.PROCESSING)
         
         # Get file info
@@ -190,18 +212,20 @@ async def quality_handler_direct(client, callback):
         # Download the file
         await client.download_media(original_msg, file_name=file_path)
         
+        if not os.path.exists(file_path):
+            raise Exception("Failed to download file")
+        
         # Process the video
         processed_path = await process_video(file_path, action, quality)
         
         if not processed_path or not os.path.exists(processed_path):
             raise Exception("Processing failed")
         
-        # Send the processed video with file size check
+        # Send the processed video
         file_size = os.path.getsize(processed_path)
-        max_video_size = 50 * 1024 * 1024  # 50MB limit for videos
         
         try:
-            if file_size > max_video_size:
+            if file_size > MAX_VIDEO_SIZE:
                 # Send as document if file is too large for video
                 await callback.message.reply_document(
                     processed_path,
@@ -214,9 +238,9 @@ async def quality_handler_direct(client, callback):
                     caption=f"{TEXT.SUCCESS}\n{TEXT.WATERMARK}",
                     reply_markup=INLINE.CREDITS_BTN
                 )
-        except Exception as e:
+        except Exception as send_error:
             # Fallback to document if video sending fails
-            logger.warning(f"Failed to send as video, trying as document: {e}")
+            logger.warning(f"Failed to send as video, trying as document: {send_error}")
             await callback.message.reply_document(
                 processed_path,
                 caption=f"{TEXT.SUCCESS}\n{TEXT.WATERMARK}",
@@ -226,8 +250,13 @@ async def quality_handler_direct(client, callback):
         await callback.answer()
         
     except Exception as e:
-        logger.error(f"Quality error: {str(e)}")
+        logger.error(f"Quality handler error: {str(e)}")
         await callback.answer(TEXT.FAILED, show_alert=True)
+        if processing_msg:
+            try:
+                await processing_msg.edit_text(f"{TEXT.FAILED}: {str(e)}")
+            except:
+                pass
     finally:
         # Clean up processing message
         if processing_msg:
@@ -237,13 +266,9 @@ async def quality_handler_direct(client, callback):
                 pass
         
         # Clean up files
-        if file_path and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except:
-                pass
-        if processed_path and os.path.exists(processed_path):
-            try:
-                os.remove(processed_path)
-            except:
-                pass
+        for path in [file_path, processed_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup {path}: {cleanup_error}")
