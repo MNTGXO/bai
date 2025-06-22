@@ -125,7 +125,7 @@ async def video_handler_direct(client, message):
         reply_markup=INLINE.ACTION_BTNS
     )
 
-@MN_Bot.on_callback_query(filters.regex("^action_(upscale|compress)$"))
+@Client.on_callback_query(filters.regex("^action_(upscale|compress)$"))
 async def action_handler_direct(client, callback):
     try:
         action = callback.data.split('_')[1]
@@ -143,7 +143,7 @@ async def action_handler_direct(client, callback):
         logger.error(f"Action error: {str(e)}")
         await callback.answer(TEXT.FAILED, show_alert=True)
 
-@MN_Bot.on_callback_query(filters.regex("^quality_"))
+@Client.on_callback_query(filters.regex("^quality_"))
 async def quality_handler_direct(client, callback):
     processing_msg = None
     file_path = None
